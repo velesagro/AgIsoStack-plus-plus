@@ -16,7 +16,7 @@
 
 #include <deque>
 
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 #include <condition_variable>
 #endif
 
@@ -381,7 +381,7 @@ namespace isobus
 		/// @returns The language command interface used to communicate with the client which language/units are in use.
 		LanguageCommandInterface &get_language_command_interface();
 
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 		/// @brief Returns a condition variable which you can optionally use to wake up your server's thread
 		/// when messages are received from the client.
 		/// @returns A condition variable which you can optionally use to wake up your server's thread
@@ -599,7 +599,7 @@ namespace isobus
 		std::shared_ptr<InternalControlFunction> serverControlFunction; ///< The control function used to communicate with the clients.
 		std::deque<CANMessage> rxMessageQueue; ///< A queue of messages received from the clients which will be processed when update is called.
 		std::deque<std::shared_ptr<ActiveClient>> activeClients; ///< A list of clients that are currently being communicated with.
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 		std::condition_variable updateWakeupCondition; ///< A condition variable you can optionally use to update the interface when messages are received
 		std::mutex messagesMutex; ///< A mutex used to protect the rxMessageQueue.
 #endif

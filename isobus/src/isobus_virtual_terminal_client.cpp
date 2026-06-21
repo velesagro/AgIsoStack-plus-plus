@@ -60,7 +60,7 @@ namespace isobus
 			{
 				languageCommandInterface.initialize();
 			}
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING && !defined USE_CMSIS_RTOS2_THREADING
 			if (spawnThread)
 			{
 				workerThread = new std::thread([this]() { worker_thread_function(); });
@@ -98,7 +98,7 @@ namespace isobus
 			}
 
 			shouldTerminate = true;
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 			if (nullptr != workerThread)
 			{
 				workerThread->join();
@@ -115,7 +115,7 @@ namespace isobus
 	void VirtualTerminalClient::restart_communication()
 	{
 		LOG_INFO("[VT]:VT Client connection restart requested. Client will now terminate and reinitialize.");
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 		bool workerNeeded = (nullptr != workerThread);
 #else
 		bool workerNeeded = false;
@@ -4686,7 +4686,7 @@ namespace isobus
 
 	void VirtualTerminalClient::worker_thread_function()
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 		for (;;)
 		{
 			if (shouldTerminate)

@@ -21,7 +21,7 @@
 #include <deque>
 #include <vector>
 
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 #include <condition_variable>
 #include <thread>
 #endif
@@ -191,7 +191,11 @@ namespace isobus
 		static void stop_threads();
 
 		static std::unique_ptr<Thread> updateThread; ///< The main thread
+#if defined USE_CMSIS_RTOS2_THREADING
+		static isobus::ConditionVariable updateThreadWakeupCondition; ///< A condition variable to allow for signaling the `updateThread` to wakeup
+#else
 		static std::condition_variable updateThreadWakeupCondition; ///< A condition variable to allow for signaling the `updateThread` to wakeup
+#endif
 #endif
 		static std::uint32_t lastUpdateTimestamp; ///< The last time the network manager was updated
 		static std::uint32_t periodicUpdateInterval; ///< The period between calls to the network manager update function in milliseconds

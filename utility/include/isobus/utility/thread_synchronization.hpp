@@ -103,6 +103,7 @@ private:
 #include "cmsis_os.h"
 
 #include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -601,6 +602,41 @@ private:
 #if defined CAN_STACK_DISABLE_THREADS || defined ARDUINO
 template<typename T>
 using Queue = UnsafeQueue<T>;
+#elif defined USE_CMSIS_RTOS2_THREADING
+
+// Під CMSIS RTOS2 використовуємо CMSIS-мьютекс + LockGuard (std::mutex недоступний).
+template<typename T>
+class SafeQueue : private UnsafeQueue<T>
+{
+	using Q = UnsafeQueue<T>;
+
+public:
+	using value_type = T;
+
+	template<typename U, typename = typename std::enable_if<std::is_convertible<U, value_type>::value>::type>
+	void push(U &&item)
+	{
+		const isobus::LockGuard<isobus::Mutex> lock(&mtx);
+		Q::push(std::forward<U>(item));
+	}
+
+	bool pop(value_type *item)
+	{
+		const isobus::LockGuard<isobus::Mutex> lock(&mtx);
+		return Q::pop(item);
+	}
+
+	void clear()
+	{
+		const isobus::LockGuard<isobus::Mutex> lock(&mtx);
+		Q::clear();
+	}
+
+private:
+	isobus::Mutex mtx;
+};
+template<typename T>
+using Queue = SafeQueue<T>;
 #else
 
 #include <mutex>

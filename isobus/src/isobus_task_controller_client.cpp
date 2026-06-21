@@ -19,7 +19,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 #include <thread>
 #endif
 
@@ -61,7 +61,7 @@ namespace isobus
 
 		if (!initialized)
 		{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING && !defined USE_CMSIS_RTOS2_THREADING
 			if (spawnThread)
 			{
 				workerThread = new std::thread([this]() { worker_thread_function(); });
@@ -267,7 +267,7 @@ namespace isobus
 
 			shouldTerminate = true;
 
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 			if ((nullptr != workerThread) && (workerThread->get_id() != std::this_thread::get_id()))
 			{
 				workerThread->join();
@@ -2422,7 +2422,7 @@ namespace isobus
 
 	void TaskControllerClient::worker_thread_function()
 	{
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 		for (;;)
 		{
 			if (shouldTerminate)
