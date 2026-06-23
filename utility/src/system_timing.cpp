@@ -9,12 +9,16 @@
 
 #include "isobus/utility/system_timing.hpp"
 
+#if !defined USE_CMSIS_RTOS2_THREADING
 #include "isobus/utility/chrono_time_source.hpp"
+#endif
 
 namespace isobus
 {
 	TimeSource *SystemTiming::s_custom_timesource = nullptr;
+#if !defined USE_CMSIS_RTOS2_THREADING
 	static ChronoTimeSource default_time_source;
+#endif
 
 	std::uint32_t SystemTiming::get_timestamp_ms()
 	{
@@ -57,7 +61,13 @@ namespace isobus
 		{
 			return s_custom_timesource;
 		}
+#if !defined USE_CMSIS_RTOS2_THREADING
 		return &default_time_source;
+#else
+		// На embedded має бути встановлений custom timesource через override_time_source()
+		// до першого використання стека. Якщо ні — зациклюємо для дебагу.
+		while (true) {}
+#endif
 	}
 
 }

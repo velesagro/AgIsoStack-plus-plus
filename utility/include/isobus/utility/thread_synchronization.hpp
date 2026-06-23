@@ -101,6 +101,9 @@ private:
 #elif defined USE_CMSIS_RTOS2_THREADING
 
 #include "cmsis_os.h"
+#include "FreeRTOS.h"
+#include "semphr.h"
+#include "task.h"
 
 #include <atomic>
 #include <cassert>
@@ -124,21 +127,9 @@ namespace isobus
 		/// @brief Locks the mutex. Part of BasicLockable requirements.
 		void lock()
 		{
-			if (ready())
+			if (ready() && xTaskGetSchedulerState() == taskSCHEDULER_RUNNING)
 			{
-				osStatus_t osRetVal = osMutexAcquire(handle, osWaitForever);
-
-				if (osOK != osRetVal)
-				{
-					while (true)
-					{
-						// If your code is stuck in here, that means you did something
-						// very wrong, like recursively locked this mutex, or tried to
-						// lock the mutex before the OS was initialized, or called this in
-						// an interrupt service routine.
-						// osRetVal may contain more information.
-					}
-				}
+				xSemaphoreTake((SemaphoreHandle_t)handle, portMAX_DELAY);
 			}
 		}
 
@@ -146,42 +137,19 @@ namespace isobus
 		/// @returns true if the mutex was successfully locked, false otherwise.
 		bool try_lock()
 		{
-			bool retVal = false;
-
-			if (ready())
+			if (ready() && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
 			{
-				osStatus_t osRetVal = osMutexAcquire(handle, 0);
-				retVal = (osOK == osRetVal);
+				return xSemaphoreTake((SemaphoreHandle_t)handle, 0) == pdTRUE;
 			}
-			return retVal;
+			return true; // pre-kernel: вважаємо "locked" (одна нитка)
 		}
 
 		/// @brief Unlocks the mutex. Part of BasicLockable requirements.
 		void unlock()
 		{
-			if (nullptr != handle)
+			if (nullptr != handle && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
 			{
-				osStatus_t osRetVal = osMutexRelease(handle);
-
-				if (osOK != osRetVal)
-				{
-					while (true)
-					{
-						// If your code is stuck in here, that means you
-						// either tried to release a mutex which is owned by a different thread,
-						// or the release failed due to some other OS reason.
-						// osRetVal may contain more information.
-					}
-				}
-			}
-			else
-			{
-				while (true)
-				{
-					// If your code is stuck in here, it's because you tried to unlock a
-					// mutex which doesn't exist. Don't do that.
-					// osRetVal may contain more information.
-				}
+				xSemaphoreGive((SemaphoreHandle_t)handle);
 			}
 		}
 
@@ -204,12 +172,11 @@ namespace isobus
 				};
 				handle = osMutexNew(&attributes);
 
-				while (nullptr == handle)
+				// Fallback: якщо CMSIS wrapper відмовив (напр. ядро ще не ready),
+				// спробувати FreeRTOS API напряму — воно працює до osKernelStart.
+				if (nullptr == handle)
 				{
-					// If your code is stuck in here, it means
-					// the RTOS didn't have enough memory available to make another
-					// mutex. Increase the global memory pool (sometimes called the OS heap)
-					// or reduce its usage by statically allocating your thread's stack(s)
+					handle = (osMutexId_t)xSemaphoreCreateMutex();
 				}
 			}
 			return nullptr != handle;

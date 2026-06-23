@@ -19,7 +19,11 @@ namespace isobus
 {
 #if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO
 	std::unique_ptr<Thread> CANHardwareInterface::updateThread;
+#if defined USE_CMSIS_RTOS2_THREADING
+	isobus::ConditionVariable CANHardwareInterface::updateThreadWakeupCondition;
+#else
 	std::condition_variable CANHardwareInterface::updateThreadWakeupCondition;
+#endif
 #endif
 	std::uint32_t CANHardwareInterface::periodicUpdateInterval = PERIODIC_UPDATE_INTERVAL;
 	std::uint32_t CANHardwareInterface::lastUpdateTimestamp;
