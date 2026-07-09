@@ -60,7 +60,7 @@ namespace isobus
 			{
 				languageCommandInterface.initialize();
 			}
-#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING && !defined USE_CMSIS_RTOS2_THREADING
+#if !defined CAN_STACK_DISABLE_THREADS && !defined ARDUINO && !defined USE_CMSIS_RTOS2_THREADING
 			if (spawnThread)
 			{
 				workerThread = new std::thread([this]() { worker_thread_function(); });
@@ -3404,6 +3404,17 @@ namespace isobus
 			}
 			else if (objectPool.useDataCallback)
 			{
+#ifdef IOP_POOL_IN_FLASH
+				// IOP_POOL_IN_FLASH: the object pool is stored in external flash and
+				// streamed to the VT through the data chunk callback. Auto-scaling is
+				// not supported in this mode, because scaling requires buffering the
+				// entire pool in RAM (scaledObjectPool), which defeats the purpose of
+				// streaming on RAM-constrained targets. Supply a pre-scaled pool and
+				// do not call set_object_pool_scaling() for chunked pools.
+				LOG_ERROR("[VT]: Auto-scaling is not supported for chunked object pools when IOP_POOL_IN_FLASH is defined. Provide a pre-scaled pool.");
+				retVal = false;
+				break;
+#else
 				objectPool.scaledObjectPool.resize(objectPool.objectPoolSize);
 
 				for (std::uint32_t i = 0; i < objectPool.objectPoolSize; i++)
@@ -3415,6 +3426,7 @@ namespace isobus
 				{
 					break;
 				}
+#endif
 			}
 
 			// Step 2, Parse the pool and resize each object as we iterate through it

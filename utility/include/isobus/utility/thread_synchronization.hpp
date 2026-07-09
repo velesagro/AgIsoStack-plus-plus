@@ -107,6 +107,7 @@ private:
 
 #include <atomic>
 #include <cassert>
+#include <cstddef> // NULL — do not rely on cmsis_os.h pulling it in transitively
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -125,6 +126,13 @@ namespace isobus
 		}
 
 		/// @brief Locks the mutex. Part of BasicLockable requirements.
+		/// @note lock()/try_lock()/unlock() must all use the SAME scheduler-state
+		/// condition. Previously lock() skipped taking the semaphore while the
+		/// scheduler was suspended (checked == RUNNING) but unlock() still gave it
+		/// (checked != NOT_STARTED), producing an unpaired xSemaphoreGive on a
+		/// mutex that was never taken. All three now act only when the scheduler
+		/// is RUNNING; pre-kernel and scheduler-suspended contexts are effectively
+		/// single-threaded, so skipping the semaphore there is safe.
 		void lock()
 		{
 			if (ready() && xTaskGetSchedulerState() == taskSCHEDULER_RUNNING)
@@ -133,21 +141,21 @@ namespace isobus
 			}
 		}
 
-		/// @brief Attempts to the mutex, and doesn't wait if it's not available.
+		/// @brief Attempts to lock the mutex, and doesn't wait if it's not available.
 		/// @returns true if the mutex was successfully locked, false otherwise.
 		bool try_lock()
 		{
-			if (ready() && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
+			if (ready() && xTaskGetSchedulerState() == taskSCHEDULER_RUNNING)
 			{
 				return xSemaphoreTake((SemaphoreHandle_t)handle, 0) == pdTRUE;
 			}
-			return true; // pre-kernel: вважаємо "locked" (одна нитка)
+			return true; // Pre-kernel / scheduler suspended: single-threaded, treat as locked.
 		}
 
 		/// @brief Unlocks the mutex. Part of BasicLockable requirements.
 		void unlock()
 		{
-			if (nullptr != handle && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
+			if (nullptr != handle && xTaskGetSchedulerState() == taskSCHEDULER_RUNNING)
 			{
 				xSemaphoreGive((SemaphoreHandle_t)handle);
 			}
@@ -239,21 +247,37 @@ namespace isobus
 		T *lockable; ///< The mutex to lock and unlock.
 	};
 
-	/// @brief A class that emulates a condition variable using CMSIS thread flags
+	/// @brief A class that emulates a condition variable using CMSIS thread flags.
+	/// @note Limitation: only a single waiting thread is supported (thread flags
+	/// target one thread), which matches how the CAN stack uses it (one update
+	/// thread). Thread flags are latched, so a notification that arrives between
+	/// unlock() and osThreadFlagsWait() is not lost.
 	class ConditionVariable
 	{
 	public:
 		ConditionVariable() = default;
 
-		void wait_for(Mutex &, std::uint32_t timeout)
+		void wait_for(Mutex &mutex, std::uint32_t timeout)
 		{
 			targetThread = osThreadGetId();
+			// Release the mutex for the duration of the wait, like
+			// std::condition_variable::wait_for does. Previously the mutex stayed
+			// locked while blocked on the thread flag, so any other thread trying
+			// to take it stalled for up to the full timeout.
+			mutex.unlock();
 			osThreadFlagsWait(0x00000001, osFlagsWaitAny, timeout);
+			mutex.lock();
 		}
 
 		void notify_all()
 		{
-			osThreadFlagsSet(targetThread, 0x00000001);
+			// May legitimately be called before any thread has ever waited
+			// (e.g. a CAN frame arrives before the update thread's first wait);
+			// osThreadFlagsSet(NULL, ...) is invalid, so guard it.
+			if (NULL != targetThread)
+			{
+				osThreadFlagsSet(targetThread, 0x00000001);
+			}
 		}
 
 	private:
@@ -298,6 +322,12 @@ namespace isobus
 
 		void join()
 		{
+			// WARNING: this is NOT a real join. osThreadTerminate() forcibly kills
+			// the thread instead of waiting for it to finish; any mutex it holds
+			// stays locked and any resource it owns leaks. CMSIS-FreeRTOS does not
+			// reliably implement osThreadJoin(), so callers must ensure the thread
+			// has reached a safe point (e.g. its termination flag was observed)
+			// before calling join().
 			if (isJoinable)
 			{
 				osThreadTerminate(myID);
@@ -327,14 +357,14 @@ class LockFreeQueue
 public:
 	/// @brief Constructor for the lock free queue.
 	explicit LockFreeQueue(std::size_t size) :
-	  buffer(size), capacity(size)
+	  buffer(size > 0 ? size : 1), capacity(size > 0 ? size : 1)
 	{
-		// Validate the size of the queue, if assertion is disabled, set the size to 1.
+		// Validate the size of the queue. The size==0 fallback must be applied in
+		// the member initializer list: the previous implementation assigned the
+		// local `size` parameter in the constructor body AFTER buffer/capacity had
+		// already been constructed with 0, which left capacity==0 and made
+		// nextIndex() divide by zero when assertions are disabled (NDEBUG).
 		assert(size > 0 && "The size of the queue must be greater than 0.");
-		if (size == 0)
-		{
-			size = 1;
-		}
 	}
 
 	/// @brief Push an item to the queue.
@@ -442,14 +472,14 @@ class LockFreeQueue
 public:
 	/// @brief Constructor for the lock free queue.
 	explicit LockFreeQueue(std::size_t size) :
-	  buffer(size), capacity(size)
+	  buffer(size > 0 ? size : 1), capacity(size > 0 ? size : 1)
 	{
-		// Validate the size of the queue, if assertion is disabled, set the size to 1.
+		// Validate the size of the queue. The size==0 fallback must be applied in
+		// the member initializer list: the previous implementation assigned the
+		// local `size` parameter in the constructor body AFTER buffer/capacity had
+		// already been constructed with 0, which left capacity==0 and made
+		// nextIndex() divide by zero when assertions are disabled (NDEBUG).
 		assert(size > 0 && "The size of the queue must be greater than 0.");
-		if (size == 0)
-		{
-			size = 1;
-		}
 	}
 
 	/// @brief Push an item to the queue.

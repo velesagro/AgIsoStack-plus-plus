@@ -9,6 +9,8 @@
 
 #include "isobus/isobus/can_message_data.hpp"
 
+#include "isobus/isobus/can_stack_logger.hpp"
+
 #include <algorithm>
 
 namespace isobus
@@ -108,7 +110,16 @@ namespace isobus
 		{
 			initialized = true;
 			dataOffset = index;
-			callback(0, dataOffset, std::min(totalSize - dataOffset, bufferSize), buffer.data(), parentPointer);
+			if (!callback(0, dataOffset, std::min(totalSize - dataOffset, bufferSize), buffer.data(), parentPointer))
+			{
+				// The data source failed to provide this chunk (e.g. an external
+				// flash read error). The get_byte() interface cannot propagate the
+				// failure, and previously the stale content of the previous chunk
+				// was silently transmitted. Fill with 0xFF instead so the failure
+				// is deterministic and detectable by the receiver, and log it.
+				std::fill(buffer.begin(), buffer.end(), 0xFF);
+				LOG_ERROR("[TP/ETP]: Data chunk callback failed at offset %lu, sending 0xFF padding", static_cast<unsigned long>(dataOffset));
+			}
 		}
 		return buffer[index - dataOffset];
 	}

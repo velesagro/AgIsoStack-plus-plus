@@ -1246,6 +1246,9 @@ namespace isobus
 		/// @details This is probably better for huge pools if you are RAM constrained, or if your
 		/// pool is stored on some external device that you need to get data from in pages.
 		/// This is also the best way to load from IOP files, as you can read the data in piece by piece.
+		/// @note When IOP_POOL_IN_FLASH is defined, auto-scaling (set_object_pool_scaling) must not be
+		/// used together with a chunked pool: scaling would buffer the whole pool in RAM, which is
+		/// exactly what this mode is meant to avoid. Provide a pre-scaled pool instead.
 		/// @param[in] poolIndex The index of the pool you are assigning
 		/// @param[in] poolTotalSize The object pool size
 		/// @param[in] value The data callback that will be used to get object pool data to upload.
