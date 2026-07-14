@@ -861,6 +861,7 @@ namespace isobus
 				}
 				else
 				{
+                                        controlFunctionTable[rxFrame.channel][claimedAddress] = foundControlFunction;
 					LOG_INFO("[NM]: %s control function with name %016llx has claimed address %u on channel %u.",
 					         foundControlFunction->get_type_string().c_str(),
 					         foundControlFunction->get_NAME().get_full_name(),
