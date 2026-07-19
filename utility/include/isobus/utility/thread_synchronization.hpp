@@ -36,20 +36,39 @@ namespace isobus
 /// @brief Disabled LOCK_GUARD macro since threads are disabled.
 #define LOCK_GUARD(type, x)
 
-/// @brief A template class for a queue, since threads are disabled this is a simple queue.
+/// @brief A template class for a queue with a capacity limit when threads are disabled.
 /// @tparam T The item type for the queue.
+///
+/// @note STM32 bare-metal (CAN_STACK_DISABLE_THREADS):
+/// Оригінальна версія ігнорувала queueCapacity (конструктор приймав і
+/// викидав параметр) і завжди повертала is_full()=false. При зависанні
+/// шини (немає ACK — дисплей ребутується) AgIsoStack продовжував пушити
+/// кадри у std::deque через необмежену push(); за ~30..60 с heap STM32
+/// вичерпувався → vApplicationMallocFailedHook → зависання хаба.
+/// Первинний фікс — TX-abort у STM32bxCANPlugin::write_frame() (100 мс),
+/// ця зміна — страховка: навіть якщо abort не спрацює, черга не зросте
+/// більше capacity і push() поверне false (AgIsoStack коректно обробляє
+/// відмову, не втрачаючи кадрів коли шина знову з'явиться).
 template<typename T>
 class LockFreeQueue
 {
 public:
 	/// @brief Constructor for the lock free queue.
-	explicit LockFreeQueue(std::size_t) {}
+	/// @param size Maximum number of items the queue can hold (enforced, unlike original).
+	explicit LockFreeQueue(std::size_t size) :
+	  capacity((size > 0) ? size : 1)
+	{
+	}
 
 	/// @brief Push an item to the queue.
 	/// @param item The item to push to the queue.
-	/// @return Simply returns true, since this version of the queue is not limited in size.
+	/// @return True if pushed successfully, false if the queue is full.
 	bool push(const T &item)
 	{
+		if (queue.size() >= capacity)
+		{
+			return false;
+		}
 		queue.push(item);
 		return true;
 	}
@@ -82,10 +101,10 @@ public:
 	}
 
 	/// @brief Check if the queue is full.
-	/// @return Always returns false, since this version of the queue is not limited in size.
+	/// @return True if the queue has reached its capacity.
 	bool is_full() const
 	{
-		return false;
+		return queue.size() >= capacity;
 	}
 
 	/// @brief Clear the queue.
@@ -95,7 +114,8 @@ public:
 	}
 
 private:
-	std::queue<T> queue; ///< The queue
+	std::queue<T> queue;    ///< The underlying queue
+	std::size_t   capacity; ///< Maximum number of items (enforced on bare-metal)
 };
 
 #elif defined USE_CMSIS_RTOS2_THREADING
