@@ -9,6 +9,8 @@
 //================================================================================================
 #include "isobus/isobus/can_stack_logger.hpp"
 
+#include <cstdarg>
+#include <cstdio>
 #include <iostream>
 
 namespace isobus
@@ -18,6 +20,50 @@ namespace isobus
 	Mutex CANStackLogger::loggerMutex;
 
 #ifndef DISABLE_CAN_STACK_LOGGER
+
+#ifdef CAN_STACK_LOGGER_NO_HEAP
+#ifndef CAN_STACK_LOGGER_LINE_MAX
+#define CAN_STACK_LOGGER_LINE_MAX 160
+#endif
+	void CANStackLogger::CAN_stack_log_lean(LoggingLevel level, const char *format, ...)
+	{
+		// Швидкий вихід ДО взяття м'ютекса й ДО будь-якого форматування:
+		// вимкнені рівні (Debug/Info при порозі Warning) коштують ~декілька
+		// інструкцій. Читання без локу race-benign: обидва поля — прості
+		// скаляри, найгірший наслідок — один пропущений/зайвий рядок на межі
+		// зміни рівня.
+		if ((nullptr == logger) || (level < currentLogLevel))
+		{
+			return;
+		}
+
+		LOCK_GUARD(Mutex, loggerMutex);
+		CANStackLogger *canStackLogger = nullptr;
+
+		if ((get_can_stack_logger(canStackLogger)) &&
+		    (level >= get_log_level()))
+		{
+			// Один буфер на весь стек: захищений loggerMutex, тому static
+			// безпечний. Живе у .bss (SRAM), НЕ в купі й НЕ на стеку задачі.
+			static char leanBuffer[CAN_STACK_LOGGER_LINE_MAX];
+
+			va_list args;
+			va_start(args, format);
+			vsnprintf(leanBuffer, sizeof(leanBuffer), format, args);
+			va_end(args);
+
+			canStackLogger->sink_CAN_stack_log_lean(level, leanBuffer);
+		}
+	}
+
+	void CANStackLogger::CAN_stack_log(LoggingLevel level, const std::string &logText)
+	{
+		// Рідкісний шлях (єдиний call site у бібліотеці — oss.str() у
+		// time_date_interface): рядок уже сконструйований викликачем,
+		// додаткових алокацій тут немає.
+		CAN_stack_log_lean(level, "%s", logText.c_str());
+	}
+#else
 	void CANStackLogger::CAN_stack_log(LoggingLevel level, const std::string &logText)
 	{
 		LOCK_GUARD(Mutex, loggerMutex);
@@ -29,6 +75,7 @@ namespace isobus
 			canStackLogger->sink_CAN_stack_log(level, logText);
 		}
 	}
+#endif // CAN_STACK_LOGGER_NO_HEAP
 
 	void CANStackLogger::debug(const std::string &logText)
 	{
@@ -75,6 +122,21 @@ namespace isobus
 	void CANStackLogger::sink_CAN_stack_log(LoggingLevel, const std::string &)
 	{
 		// Override this function to use the log sink
+	}
+
+	void CANStackLogger::sink_CAN_stack_log_lean(LoggingLevel level, const char *logText)
+	{
+#ifdef CAN_STACK_LOGGER_NO_HEAP
+		// В embedded-режимі дефолт — нічого: sink зобов'язаний перевизначити
+		// саме lean-варіант, інакше форвардинг у std::string звів би нанівець
+		// увесь сенс no-heap шляху.
+		(void)level;
+		(void)logText;
+#else
+		// На десктопі — сумісність: форвардимо у штатний string-sink, щоб
+		// наявні sink-и (console logger тощо) працювали без змін.
+		sink_CAN_stack_log(level, std::string(logText));
+#endif
 	}
 
 	bool CANStackLogger::get_can_stack_logger(CANStackLogger *&canStackLogger)

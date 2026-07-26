@@ -51,6 +51,33 @@ namespace isobus
 		/// @param[in] logText The text to be logged
 		static void CAN_stack_log(LoggingLevel level, const std::string &logText);
 
+#ifdef CAN_STACK_LOGGER_NO_HEAP
+		// ── Режим без heap-алокацій (embedded) ─────────────────────────────────
+		//  Штатний шлях робив на КОЖЕН лог-рядок: snprintf-прохід виміру,
+		//  new char[], std::string — 2–3 heap-алокації у спільній купі FreeRTOS.
+		//  Тут форматування йде одразу у статичний буфер під loggerMutex, а
+		//  sink отримує const char* (sink_CAN_stack_log_lean). Практично всі
+		//  675 лог-викликів у бібліотеці передають літерали const char[], тож
+		//  overload resolution (array-to-pointer краще за user-defined
+		//  conversion у std::string) направляє їх сюди без правок call sites.
+		//
+		//  ОБМЕЖЕННЯ:
+		//   • аргументи мають бути printf-сумісними (POD/вказівники) — як і
+		//     раніше, бо штатний шлях теж годував їх у std::snprintf;
+		//   • sink НЕ МОЖЕ логувати сам (non-recursive loggerMutex → deadlock);
+		//   • рядок обрізається до CAN_STACK_LOGGER_LINE_MAX (default 160).
+
+		/// @brief C-variadic ядро no-heap шляху: format у статичний буфер + lean sink.
+		static void CAN_stack_log_lean(LoggingLevel level, const char *format, ...);
+
+		/// @brief No-heap перевантаження для літеральних format-рядків (основний шлях).
+		template<typename... Args>
+		static void CAN_stack_log(LoggingLevel level, const char *format, Args... args)
+		{
+			CAN_stack_log_lean(level, format, args...);
+		}
+#endif // CAN_STACK_LOGGER_NO_HEAP
+
 		/// @brief Gets called from the CAN stack to log information. Wraps sink_CAN_stack_log.
 		/// @param[in] level The log level for this text
 		/// @param[in] format A format string of text to log, similar to printf
@@ -58,6 +85,9 @@ namespace isobus
 		template<typename... Args>
 		static void CAN_stack_log(LoggingLevel level, const std::string &format, Args... args)
 		{
+#ifdef CAN_STACK_LOGGER_NO_HEAP
+			CAN_stack_log_lean(level, format.c_str(), args...);
+#else
 			int size_s = std::snprintf(nullptr, 0, format.c_str(), args...) + 1; // Extra space for '\0'
 			if (size_s > 0)
 			{
@@ -70,6 +100,7 @@ namespace isobus
 			{
 				CAN_stack_log(level, format); // If snprintf had some error, at least print the format string
 			}
+#endif // CAN_STACK_LOGGER_NO_HEAP
 		}
 
 		/// @brief Logs a string to the log sink with `Debug` severity. Wraps sink_CAN_stack_log.
@@ -137,6 +168,39 @@ namespace isobus
 			CAN_stack_log(LoggingLevel::Critical, format, args...);
 		}
 
+#ifdef CAN_STACK_LOGGER_NO_HEAP
+		// ── No-heap перевантаження рівнів ──────────────────────────────────────
+		//  Без них виклик debug("literal") конструював би std::string-тимчасовий
+		//  (heap-алокація для рядків довших за SSO) ще ДО потрапляння в lean-шлях.
+		//  const char* тут точніший матч, ніж user-defined conversion → literal
+		//  завжди йде без алокацій.
+		template<typename... Args>
+		static void debug(const char *format, Args... args)
+		{
+			CAN_stack_log_lean(LoggingLevel::Debug, format, args...);
+		}
+		template<typename... Args>
+		static void info(const char *format, Args... args)
+		{
+			CAN_stack_log_lean(LoggingLevel::Info, format, args...);
+		}
+		template<typename... Args>
+		static void warn(const char *format, Args... args)
+		{
+			CAN_stack_log_lean(LoggingLevel::Warning, format, args...);
+		}
+		template<typename... Args>
+		static void error(const char *format, Args... args)
+		{
+			CAN_stack_log_lean(LoggingLevel::Error, format, args...);
+		}
+		template<typename... Args>
+		static void critical(const char *format, Args... args)
+		{
+			CAN_stack_log_lean(LoggingLevel::Critical, format, args...);
+		}
+#endif // CAN_STACK_LOGGER_NO_HEAP
+
 #endif
 
 		/// @brief Assigns a derived logger class to be used as the log sink
@@ -159,6 +223,14 @@ namespace isobus
 		/// @param[in] level The severity level of the log text
 		/// @param[in] logText The information being logged
 		virtual void sink_CAN_stack_log(LoggingLevel level, const std::string &logText);
+
+		/// @brief Heap-free sink варіант: викликається з no-heap шляху
+		/// (CAN_STACK_LOGGER_NO_HEAP) вже під loggerMutex зі статичним буфером.
+		/// logText валідний ЛИШЕ на час виклику — копіюйте, не зберігайте вказівник.
+		/// НЕ логуйте зсередини sink (non-recursive mutex → deadlock).
+		/// @param[in] level The severity level of the log text
+		/// @param[in] logText NUL-термінований рядок (усічений до CAN_STACK_LOGGER_LINE_MAX)
+		virtual void sink_CAN_stack_log_lean(LoggingLevel level, const char *logText);
 
 	private:
 		/// @brief Provides a pointer to the static instance of the logger, and returns if the pointer is valid
